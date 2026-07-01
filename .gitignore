@@ -20,6 +20,9 @@
 # production
 /build
 
+# local scraped-scores cache (populated at runtime)
+/.cache/
+
 # misc
 .DS_Store
 *.pem

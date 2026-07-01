@@ -1,10 +1,12 @@
-import { getAllDivisions } from "@/lib/dci";
+import { getScores } from "@/lib/cache";
 import ScoresView from "./ScoresView";
 
-// Scrape + cache the live scores server-side; re-scrape at most every 5 minutes.
-export const revalidate = 300;
+// Read the cached scores file directly on the server. If the cache doesn't
+// exist yet, `getScores` scrapes dciscores.com once to populate it. Because we
+// read from disk (and may scrape), this page renders at request time.
+export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const divisions = await getAllDivisions();
-  return <ScoresView divisions={divisions} />;
+  const { divisions, updatedAt } = await getScores();
+  return <ScoresView divisions={divisions} updatedAt={updatedAt} />;
 }

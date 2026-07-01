@@ -6,6 +6,10 @@ import * as cheerio from "cheerio";
 // name (`title`) and a `data-content` string like:
 //   "Rank: 1<br>(75.650)&nbsp;<span class='positive_delta'>1.600</span>"
 // The parenthesized number is the score for that date; the span is the delta.
+//
+// This module only *scrapes and parses* — it never touches the cache. The
+// caller (see `cache.ts`) is responsible for persisting the result so we hit
+// dciscores.com as rarely as possible.
 
 export type Corps = {
   name: string;
@@ -43,7 +47,6 @@ const PALETTE = [
 ];
 
 const BASE_URL = "https://www.dciscores.com";
-const REVALIDATE_SECONDS = 300; // re-scrape at most every 5 minutes
 const FALLBACK_YEAR = 2026;
 
 function shortName(name: string): string {
@@ -115,7 +118,7 @@ function emptyDivision(config: DivisionConfig): Division {
   return { label: config.label, slug: config.slug, year: FALLBACK_YEAR, dates: [], corps: [] };
 }
 
-async function getDivision(config: DivisionConfig): Promise<Division> {
+async function scrapeDivision(config: DivisionConfig): Promise<Division> {
   try {
     const res = await fetch(`${BASE_URL}/${config.path}`, {
       headers: {
@@ -123,7 +126,9 @@ async function getDivision(config: DivisionConfig): Promise<Division> {
         "User-Agent":
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
       },
-      next: { revalidate: REVALIDATE_SECONDS },
+      // We manage freshness ourselves via the file cache, so always fetch live
+      // when we actually decide to scrape.
+      cache: "no-store",
     });
     if (!res.ok) return emptyDivision(config);
     return parseDivision(await res.text(), config);
@@ -133,6 +138,7 @@ async function getDivision(config: DivisionConfig): Promise<Division> {
   }
 }
 
-export async function getAllDivisions(): Promise<Division[]> {
-  return Promise.all(DIVISION_CONFIGS.map(getDivision));
+/** Scrape every division from dciscores.com in parallel. Live network call. */
+export async function scrapeAllDivisions(): Promise<Division[]> {
+  return Promise.all(DIVISION_CONFIGS.map(scrapeDivision));
 }

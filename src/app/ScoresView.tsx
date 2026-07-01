@@ -10,7 +10,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import type { Corps, Division } from "@/lib/dci";
+import type { Corps, Division } from "@/lib/scraper";
 
 const YEARS = [2026, 2025, 2024, 2023, 2022, 2019, 2018, 2017, 2016, 2015, 2014];
 
@@ -193,10 +193,51 @@ function StatsBar({ division }: { division: Division }) {
   );
 }
 
-export default function ScoresView({ divisions }: { divisions: Division[] }) {
+function formatUpdatedAt(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+export default function ScoresView({
+  divisions: initialDivisions,
+  updatedAt: initialUpdatedAt,
+}: {
+  divisions: Division[];
+  updatedAt: string;
+}) {
   const [activeDivision, setActiveDivision] = useState("world");
   const [selectedYear, setSelectedYear] = useState(2026);
   const [highlightedCorps, setHighlightedCorps] = useState<string | null>(null);
+
+  // Live-refreshable copy of the cached data. Starts from the server-rendered
+  // cache and is replaced when the user hits "Refresh Scores".
+  const [divisions, setDivisions] = useState(initialDivisions);
+  const [updatedAt, setUpdatedAt] = useState(initialUpdatedAt);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState(false);
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    setRefreshError(false);
+    try {
+      // POST re-scrapes dciscores.com and rewrites the cache file server-side.
+      const res = await fetch("/api/scores", { method: "POST" });
+      if (!res.ok) throw new Error(`Refresh failed: ${res.status}`);
+      const data: { divisions: Division[]; updatedAt: string } = await res.json();
+      setDivisions(data.divisions);
+      setUpdatedAt(data.updatedAt);
+    } catch {
+      setRefreshError(true);
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   const division = divisions.find((d) => d.slug === activeDivision) ?? divisions[0];
   const latestDate = getLatestDate(division.dates);
@@ -223,10 +264,26 @@ export default function ScoresView({ divisions }: { divisions: Division[] }) {
                 </button>
               ))}
             </div>
-            <select value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))}
-              className="bg-white/5 border border-white/10 text-white/80 text-sm rounded-xl px-3 py-2 cursor-pointer hover:bg-white/10 transition-colors focus:outline-none focus:ring-2 focus:ring-green-500/50">
-              {YEARS.map((y) => (<option key={y} value={y} className="bg-[#111a0e] text-white">{y}</option>))}
-            </select>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleRefresh}
+                disabled={refreshing}
+                title="Re-scrape live scores from dciscores.com"
+                className="inline-flex items-center gap-2 bg-white/5 border border-white/10 text-white/80 text-sm rounded-xl px-3 py-2 cursor-pointer hover:bg-white/10 transition-colors focus:outline-none focus:ring-2 focus:ring-green-500/50 disabled:opacity-50 disabled:cursor-not-allowed">
+                <svg
+                  className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`}
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                  strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                  <polyline points="21 3 21 9 15 9" />
+                </svg>
+                <span className="hidden sm:inline">{refreshing ? "Refreshing…" : "Refresh Scores"}</span>
+              </button>
+              <select value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))}
+                className="bg-white/5 border border-white/10 text-white/80 text-sm rounded-xl px-3 py-2 cursor-pointer hover:bg-white/10 transition-colors focus:outline-none focus:ring-2 focus:ring-green-500/50">
+                {YEARS.map((y) => (<option key={y} value={y} className="bg-[#111a0e] text-white">{y}</option>))}
+              </select>
+            </div>
           </div>
         </div>
       </header>
@@ -241,6 +298,13 @@ export default function ScoresView({ divisions }: { divisions: Division[] }) {
             {latestDate && (
               <p className="text-white/40 text-sm">Last updated: {latestDate}/{selectedYear} &middot; {ranked.length} corps competing</p>
             )}
+            <p className="text-white/30 text-xs mt-1">
+              {refreshError ? (
+                <span className="text-red-400/80">Refresh failed — showing cached scores.</span>
+              ) : updatedAt ? (
+                <>Cache refreshed {formatUpdatedAt(updatedAt)}</>
+              ) : null}
+            </p>
           </div>
         </div>
       </section>
